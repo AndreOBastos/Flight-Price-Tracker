@@ -1,0 +1,5 @@
+fastapi>=0.110
+uvicorn[standard]>=0.27
+fast-flights>=2.2
+pydantic>=2.5
+CurrencyConverter>=0.17

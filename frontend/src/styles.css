@@ -1,0 +1,328 @@
+:root {
+  --bg: #0f172a;
+  --panel: #1e293b;
+  --panel-2: #27334a;
+  --text: #e2e8f0;
+  --muted: #94a3b8;
+  --accent: #38bdf8;
+  --ok: #4ade80;
+  --warn: #fbbf24;
+  --err: #f87171;
+  --border: #334155;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.app {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 24px 16px 80px;
+}
+
+h1 {
+  font-size: 24px;
+  margin: 0 0 16px;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.form-grid .wide { grid-column: 1 / -1; }
+
+label {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+input[type="text"], input[type="number"], input[type="date"], select {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 14px;
+}
+input:focus, select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+button.primary {
+  background: var(--accent);
+  color: #0f172a;
+  font-weight: 600;
+  padding: 10px 16px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+}
+button.primary:disabled { opacity: 0.6; cursor: default; }
+
+/* Autocomplete */
+.autocomplete { position: relative; }
+.autocomplete-list {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-top: 4px;
+  z-index: 10;
+  max-height: 240px;
+  overflow-y: auto;
+  list-style: none;
+  padding: 4px 0;
+}
+.autocomplete-list li {
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.autocomplete-list li:hover, .autocomplete-list li.active {
+  background: rgba(56, 189, 248, 0.12);
+}
+.autocomplete-list li .iata {
+  color: var(--accent);
+  font-weight: 600;
+  margin-right: 6px;
+}
+.autocomplete-list li .muted {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* Progress */
+.progress-bar {
+  height: 8px;
+  background: var(--panel-2);
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 12px 0 8px;
+}
+.progress-bar > div {
+  height: 100%;
+  background: var(--accent);
+  transition: width 200ms ease;
+}
+
+/* Result card */
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  margin-bottom: 12px;
+}
+.card-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.card-header .dates { font-size: 16px; font-weight: 600; }
+.card-header .dates small { color: var(--muted); font-weight: normal; margin-left: 8px; }
+.card-header .price {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--accent);
+}
+.card.no-result {
+  opacity: 0.6;
+}
+.card.error {
+  border-color: var(--err);
+}
+.card.error .msg { color: var(--err); font-size: 13px; }
+
+/* Options list (top 5 per day) */
+.options-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.option {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.option.cheapest {
+  border-color: var(--accent);
+}
+.option-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.option-header:hover { background: rgba(56,189,248,0.06); }
+.option-rank {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  min-width: 24px;
+}
+.option.cheapest .option-rank { color: var(--accent); }
+.option-airlines {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 500;
+}
+.option-price {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--accent);
+}
+.option-toggle {
+  color: var(--muted);
+  font-size: 14px;
+  width: 16px;
+  text-align: center;
+}
+.option-body {
+  padding: 0 12px 12px;
+}
+
+.legs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+.leg {
+  background: var(--panel-2);
+  border-radius: 8px;
+  padding: 12px;
+}
+.leg h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.leg .airline {
+  font-weight: 600;
+  font-size: 15px;
+  margin-bottom: 6px;
+}
+.leg .route {
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+.leg .route code {
+  background: rgba(56,189,248,0.12);
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: var(--accent);
+  font-size: 12px;
+}
+.leg .meta {
+  font-size: 12px;
+  color: var(--muted);
+}
+.leg .layovers {
+  font-size: 12px;
+  margin-top: 6px;
+  color: var(--muted);
+}
+
+.map-container {
+  height: 260px;
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+.map-container .leaflet-container { background: #0b1220; }
+
+.amenities {
+  background: var(--panel-2);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+}
+.amenities .tag {
+  color: var(--warn);
+  font-size: 11px;
+  margin-bottom: 6px;
+  display: block;
+}
+.amenities table { width: 100%; border-collapse: collapse; }
+.amenities th, .amenities td {
+  text-align: left;
+  padding: 4px 6px;
+  font-size: 12px;
+}
+.amenities th {
+  color: var(--muted);
+  font-weight: 500;
+  border-bottom: 1px solid var(--border);
+}
+
+.sort-bar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.sort-bar button {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  border-radius: 5px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.sort-bar button.active {
+  background: var(--accent);
+  color: #0f172a;
+  border-color: var(--accent);
+}
+
+.status-line {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 4px 0 0;
+}
+
+.top-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.link-button {
+  background: none;
+  color: var(--accent);
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+}
