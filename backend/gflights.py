@@ -186,6 +186,55 @@ def _parse_price(raw_number: str, raw_currency_text: str, fallback_currency: str
     return n, fallback_currency
 
 
+_BLOCK_MARKERS = (
+    "unusual traffic",
+    "are you a robot",
+    "/sorry/index",
+    "captcha",
+    "before you continue to google",
+)
+_NO_FLIGHTS_MARKERS = (
+    "no flights found",
+    "no results found",
+    "no flights match",
+    "we couldn't find any flights",
+    "try changing your search",
+    "no nonstop flights",  # weaker, kept for completeness
+)
+
+
+def classify_results(html: str) -> tuple[str, int]:
+    """Return (reason, row_count) for a Google Flights results page.
+
+    reason ∈ {"ok", "blocked", "no_schedule", "no_flights"}
+      - ok            → at least one flight row in the DOM
+      - blocked       → CAPTCHA / "unusual traffic" / Google sorry page
+      - no_flights    → page has a "no flights" / "no results" message
+      - no_schedule   → page rendered but has no row and no explanatory text
+                        (Google's empty stub for routes/dates with no published
+                        schedule data, e.g. small origins far in the future)
+
+    Uses DOM/text content — not byte size — to decide.
+    """
+    if not html or not html.strip():
+        return "no_schedule", 0
+
+    parser = LexborHTMLParser(html)
+    rows = parser.css("li.pIav2d")
+    if rows:
+        return "ok", len(rows)
+
+    # Use rendered text (not raw HTML) so we don't false-match on script/style.
+    body_node = parser.css_first("body") or parser.css_first("[role='main']")
+    text = (body_node.text(separator=" ") if body_node else "").lower()
+
+    if any(m in text for m in _BLOCK_MARKERS):
+        return "blocked", 0
+    if any(m in text for m in _NO_FLIGHTS_MARKERS):
+        return "no_flights", 0
+    return "no_schedule", 0
+
+
 def parse_legs(
     html: str,
     dep_iata: str,
@@ -269,19 +318,25 @@ def parse_legs(
 # --- Fetcher with persistent browser -----------------------------------------
 
 
-_THROTTLE_DELAY = 1.5  # seconds between sequential fetches to avoid Google throttling
+_THROTTLE_DELAY = 1.5      # baseline seconds between sequential fetches
+_THROTTLE_MAX_DELAY = 20   # cap for exponential backoff on consecutive blocks
 
 log = logging.getLogger(__name__)
 
 
 class GoogleFlightsFetcher:
     """Maintains a single Playwright browser. Serialises page fetches to avoid
-    Google bot-detection from concurrent requests."""
+    Google bot-detection from concurrent requests.
+
+    Tracks consecutive "throttle" responses (suspiciously tiny HTML payloads)
+    and applies exponential backoff + browser restart to recover.
+    """
 
     def __init__(self) -> None:
         self._pw: Playwright | None = None
         self._browser: Browser | None = None
         self._lock = asyncio.Lock()
+        self._consecutive_throttles = 0
 
     async def start(self) -> None:
         if self._browser is not None:
@@ -296,6 +351,19 @@ class GoogleFlightsFetcher:
         if self._pw is not None:
             await self._pw.stop()
             self._pw = None
+
+    async def _restart_browser(self) -> None:
+        """Close and re-launch the browser to drop cookies/fingerprint state."""
+        log.warning("Restarting Playwright browser to clear throttle state…")
+        try:
+            if self._browser is not None:
+                await self._browser.close()
+        except Exception:
+            pass
+        self._browser = None
+        if self._pw is None:
+            self._pw = await async_playwright().start()
+        self._browser = await self._pw.chromium.launch(headless=True)
 
     async def _fetch_html(self, url: str) -> str:
         """Fetch a single Google Flights URL. Must be called while holding _lock.
@@ -368,7 +436,26 @@ class GoogleFlightsFetcher:
             if self._browser is None:
                 await self.start()
             html = await self._fetch_html(url)
-            await asyncio.sleep(_THROTTLE_DELAY)
+            # Adaptive cooldown: classify the actual page content. Block pages
+            # earn an exponential backoff; everything else (results, no-results,
+            # no-schedule stubs) gets the baseline pause.
+            reason, _ = classify_results(html)
+            if reason == "blocked":
+                self._consecutive_throttles += 1
+                cooldown = min(
+                    _THROTTLE_DELAY * (2 ** self._consecutive_throttles),
+                    _THROTTLE_MAX_DELAY,
+                )
+                log.warning(
+                    "Bot-detection page for %s→%s on %s (consecutive=%d). "
+                    "Cooling down %.1fs.",
+                    dep_iata, arr_iata, date_str,
+                    self._consecutive_throttles, cooldown,
+                )
+                await asyncio.sleep(cooldown)
+            else:
+                self._consecutive_throttles = 0
+                await asyncio.sleep(_THROTTLE_DELAY)
         return html
 
     async def top_oneways(
@@ -379,30 +466,60 @@ class GoogleFlightsFetcher:
         date_str: str,
         limit: int = 5,
         retries: int = 2,
-    ) -> list[Leg]:
-        """Return the cheapest `limit` one-way legs, always fetched in USD.
+    ) -> tuple[list[Leg], str]:
+        """Return (legs, reason).
 
-        Retries up to `retries` times if no legs are parsed (usually means
-        Google returned a throttled/blocked page).
+        `reason` describes the outcome:
+          - "ok"           → got `legs`, cheapest first.
+          - "no_schedule"  → Google has no schedule data for this route+date
+                             (typical for small origins far out, or routes
+                             where airlines haven't published fares yet).
+          - "blocked"      → Google served a bot-detection page even after
+                             retries — likely temporarily blocked.
+          - "no_flights"   → Full results page with no itineraries.
         """
-        for attempt in range(1, retries + 2):  # +2 because range is exclusive
+        for attempt in range(1, retries + 2):
             html = await self.fetch_oneway_html(
                 dep_iata=dep_iata,
                 arr_iata=arr_iata,
                 date_str=date_str,
                 currency="USD",
             )
-            legs = parse_legs(html, dep_iata=dep_iata, arr_iata=arr_iata, currency="USD")
-            if legs:
-                legs.sort(key=lambda leg: leg.price)
-                return legs[:limit]
-            if attempt <= retries:
+            reason, row_count = classify_results(html)
+            if reason == "ok":
+                legs = parse_legs(html, dep_iata=dep_iata, arr_iata=arr_iata, currency="USD")
+                if legs:
+                    legs.sort(key=lambda leg: leg.price)
+                    return legs[:limit], "ok"
+                # DOM had rows but the parser couldn't extract — treat as
+                # transient and retry once; otherwise surface as no_flights.
                 log.warning(
-                    "No legs parsed for %s→%s on %s (attempt %d/%d), retrying after delay…",
-                    dep_iata, arr_iata, date_str, attempt, retries + 1,
+                    "DOM had %d row(s) but parser extracted nothing for %s→%s on %s",
+                    row_count, dep_iata, arr_iata, date_str,
                 )
-                await asyncio.sleep(3)
-        return []
+                if attempt > retries:
+                    return [], "no_flights"
+                continue
+
+            if reason == "blocked":
+                if attempt <= retries:
+                    log.warning(
+                        "Blocked page for %s→%s on %s (attempt %d/%d), restarting browser…",
+                        dep_iata, arr_iata, date_str, attempt, retries + 1,
+                    )
+                    async with self._lock:
+                        await self._restart_browser()
+                        self._consecutive_throttles = 0
+                    continue
+                return [], "blocked"
+
+            # "no_schedule" or "no_flights": Google's answer is stable, so we
+            # don't retry — that would just waste time.
+            log.info(
+                "%s for %s→%s on %s.", reason, dep_iata, arr_iata, date_str,
+            )
+            return [], reason
+        return [], "blocked"
 
 
 fetcher = GoogleFlightsFetcher()

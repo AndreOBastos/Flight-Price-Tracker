@@ -76,13 +76,13 @@ async def _sweep_one_date(job: Job, departure: date) -> dict:
 
     # Run outbound then inbound sequentially — the fetcher serialises requests
     # through a single Playwright browser to avoid Google throttling.
-    outbound_legs = await gflights.fetcher.top_oneways(
+    outbound_legs, out_reason = await gflights.fetcher.top_oneways(
         dep_iata=params.origin,
         arr_iata=params.dest,
         date_str=departure.isoformat(),
         limit=TOP_N,
     )
-    inbound_legs = await gflights.fetcher.top_oneways(
+    inbound_legs, in_reason = await gflights.fetcher.top_oneways(
         dep_iata=params.dest,
         arr_iata=params.origin,
         date_str=ret.isoformat(),
@@ -90,10 +90,15 @@ async def _sweep_one_date(job: Job, departure: date) -> dict:
     )
 
     if not outbound_legs or not inbound_legs:
+        # Prefer the more specific failure mode if they differ.
+        priority = ("blocked", "no_schedule", "no_flights", "ok")
+        empty = [r for r, legs in [(out_reason, outbound_legs), (in_reason, inbound_legs)] if not legs]
+        reason = min(empty, key=lambda r: priority.index(r) if r in priority else 99)
         return {
             "departure_date": departure.isoformat(),
             "return_date": ret.isoformat(),
             "options": [],
+            "reason": reason,
         }
 
     # Build all combos, rank by total price, take top N.

@@ -108,13 +108,21 @@ export default function DayResultCard({ event }) {
   const options = event.options || [];
 
   if (options.length === 0) {
+    const reasonMsg = {
+      no_schedule:
+        "Google has no schedule data for this route on this date — likely too far in the future for the carriers serving this origin. Try closer dates.",
+      no_flights:
+        "No round trip available on this date.",
+      blocked:
+        "Google temporarily blocked our request — try this date again in a moment.",
+    }[event.reason] || "No round trip found";
     return (
       <div className="card no-result">
         <div className="card-header">
           <div className="dates">
             {event.departure_date} <small>→ {event.return_date}</small>
           </div>
-          <div className="muted">No round trip found</div>
+          <div className="muted">{reasonMsg}</div>
         </div>
       </div>
     );
