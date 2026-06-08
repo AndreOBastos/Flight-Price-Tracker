@@ -82,6 +82,57 @@ button.primary {
 }
 button.primary:disabled { opacity: 0.6; cursor: default; }
 
+label .hint {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: normal;
+  margin-left: 6px;
+}
+.hint {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* Multi-airport picker */
+.airport-picker { display: flex; flex-direction: column; gap: 6px; }
+.airport-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.airport-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(56, 189, 248, 0.15);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  color: var(--text);
+  padding: 4px 6px 4px 10px;
+  border-radius: 999px;
+  font-size: 13px;
+}
+.airport-chip button {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 4px;
+  border-radius: 50%;
+}
+.airport-chip button:hover {
+  background: rgba(248, 113, 113, 0.2);
+  color: var(--err);
+}
+.picker-limit {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: italic;
+}
+
 /* Autocomplete */
 .autocomplete { position: relative; }
 .autocomplete-list {

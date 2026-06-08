@@ -51,14 +51,16 @@ async def start_search(req: SearchRequest):
         raise HTTPException(400, "date_to must be >= date_from")
     if (req.date_to - req.date_from).days > 60:
         raise HTTPException(400, "date range must be <= 60 days")
-    if not airports.get(req.origin):
-        raise HTTPException(400, f"unknown origin IATA: {req.origin}")
-    if not airports.get(req.dest):
-        raise HTTPException(400, f"unknown destination IATA: {req.dest}")
+    for code in (*req.origins, *req.dests):
+        if not airports.get(code):
+            raise HTTPException(400, f"unknown IATA: {code}")
+    overlap = set(req.origins) & set(req.dests)
+    if overlap:
+        raise HTTPException(400, f"origin and destination share airports: {sorted(overlap)}")
 
     params = search_manager.Params(
-        origin=req.origin,
-        dest=req.dest,
+        origins=req.origins,
+        dests=req.dests,
         trip_days=req.trip_days,
         date_from=req.date_from,
         date_to=req.date_to,

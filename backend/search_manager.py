@@ -1,7 +1,9 @@
 """In-memory search job manager + SSE event queues.
 
-For each date in the range, we do two one-way searches (outbound + return) in
-parallel, returning the top 5 cheapest combos. Prices are fetched in USD then
+For each date in the range, we run a one-way search for every (origin, dest)
+pair (so multi-airport cities are handled), pool the results, and build
+round-trip combos where the outbound and return airports match. The cheapest
+5 combos across all pairs are returned. Prices are fetched in USD then
 converted to the user's selected currency.
 """
 from __future__ import annotations
@@ -26,8 +28,8 @@ TOP_N = 5  # number of cheapest round-trip combos to return per day
 
 @dataclass
 class Params:
-    origin: str
-    dest: str
+    origins: list[str]
+    dests: list[str]
     trip_days: int
     date_from: date
     date_to: date
@@ -70,41 +72,71 @@ def _convert_leg(leg_dict: dict, target: str) -> dict:
     return {**leg_dict, "price": _convert(leg_dict["price"], target), "currency": target}
 
 
+_REASON_PRIORITY = ("blocked", "no_schedule", "no_flights", "ok")
+
+
+def _pick_reason(reasons: list[str]) -> str:
+    """Choose the most informative reason from a list. Block > no_schedule >
+    no_flights. Fallback to "no_flights" if list is empty."""
+    if not reasons:
+        return "no_flights"
+    return min(reasons, key=lambda r: _REASON_PRIORITY.index(r) if r in _REASON_PRIORITY else 99)
+
+
 async def _sweep_one_date(job: Job, departure: date) -> dict:
     params = job.params
     ret = departure + timedelta(days=params.trip_days)
 
-    # Run outbound then inbound sequentially — the fetcher serialises requests
-    # through a single Playwright browser to avoid Google throttling.
-    outbound_legs, out_reason = await gflights.fetcher.top_oneways(
-        dep_iata=params.origin,
-        arr_iata=params.dest,
-        date_str=departure.isoformat(),
-        limit=TOP_N,
-    )
-    inbound_legs, in_reason = await gflights.fetcher.top_oneways(
-        dep_iata=params.dest,
-        arr_iata=params.origin,
-        date_str=ret.isoformat(),
-        limit=TOP_N,
-    )
+    # Pool one-way legs across every (o, d) pair (outbound) and every (d, o)
+    # pair (return). The fetcher serialises requests through a single Playwright
+    # browser to avoid Google throttling, so iterating sequentially is the same
+    # wall-clock as gather() would be here.
+    outbound_legs = []
+    outbound_reasons: list[str] = []
+    for o in params.origins:
+        for d in params.dests:
+            legs, reason = await gflights.fetcher.top_oneways(
+                dep_iata=o,
+                arr_iata=d,
+                date_str=departure.isoformat(),
+                limit=TOP_N,
+            )
+            outbound_legs.extend(legs)
+            outbound_reasons.append(reason)
 
-    if not outbound_legs or not inbound_legs:
-        # Prefer the more specific failure mode if they differ.
-        priority = ("blocked", "no_schedule", "no_flights", "ok")
-        empty = [r for r, legs in [(out_reason, outbound_legs), (in_reason, inbound_legs)] if not legs]
-        reason = min(empty, key=lambda r: priority.index(r) if r in priority else 99)
+    inbound_legs = []
+    inbound_reasons: list[str] = []
+    for d in params.dests:
+        for o in params.origins:
+            legs, reason = await gflights.fetcher.top_oneways(
+                dep_iata=d,
+                arr_iata=o,
+                date_str=ret.isoformat(),
+                limit=TOP_N,
+            )
+            inbound_legs.extend(legs)
+            inbound_reasons.append(reason)
+
+    # Build round-trip combos. Enforce route coherence: outbound destination
+    # must match return origin, AND outbound origin must match return
+    # destination — you don't teleport between airports between landing and
+    # taking off again.
+    combos = []
+    for out_leg, in_leg in product(outbound_legs, inbound_legs):
+        if out_leg.arr_iata != in_leg.dep_iata:
+            continue
+        if out_leg.dep_iata != in_leg.arr_iata:
+            continue
+        combos.append((out_leg.price + in_leg.price, out_leg, in_leg))
+
+    if not combos:
         return {
             "departure_date": departure.isoformat(),
             "return_date": ret.isoformat(),
             "options": [],
-            "reason": reason,
+            "reason": _pick_reason(outbound_reasons + inbound_reasons),
         }
 
-    # Build all combos, rank by total price, take top N.
-    combos = []
-    for out_leg, in_leg in product(outbound_legs, inbound_legs):
-        combos.append((out_leg.price + in_leg.price, out_leg, in_leg))
     combos.sort(key=lambda c: c[0])
     combos = combos[:TOP_N]
 
